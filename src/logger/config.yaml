@@ -1,0 +1,15 @@
+version: 1
+
+formatters:
+  formatter_app:
+    format: "[%(asctime)s][%(name)s][%(levelname)s] - %(message)s"
+
+handlers:
+  console_app:
+    class: logging.StreamHandler
+    formatter: formatter_app
+
+loggers:
+  app:
+    handlers: [console_app]
+    propagate: no
