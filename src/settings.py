@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 
@@ -36,3 +37,10 @@ class Settings:
         Returns the MLflow URI (remote or local).
         """
         return cls.MLFLOW_TRACKING_URI or cls.LOCAL_MLFLOW_URI
+
+    @classmethod
+    def logging_level(cls) -> int:
+        """
+        Returns the logging level based on the environment.
+        """
+        return logging.DEBUG if cls.ENV == "dev" else logging.INFO
