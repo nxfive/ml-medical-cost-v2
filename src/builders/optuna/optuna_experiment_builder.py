@@ -19,7 +19,7 @@ class OptunaExperimentBuilder:
         Otherwise, builds the full Optuna search space.
         """
         params = (
-            OptunaTrialGridBuilder.build(
+            OptunaTrialGridBuilder().build(
                 trial=trial,
                 optuna_params=cfg.optuna_model_config.params,
                 model_params=cfg.model.params,
@@ -32,9 +32,13 @@ class OptunaExperimentBuilder:
             )
         )
 
-        pipeline = PipelineBuilder.build(
-            model_cfg=cfg.model,
-            features_cfg=cfg.features,
-            transformation=params.get("transformation", "none"),
-        )
+        build_kwargs = {
+            "model_cfg": cfg.model,
+            "features_cfg": cfg.features,
+        }
+
+        if trial is not None:
+            build_kwargs["transformation"] = trial.params.get("transformation")
+
+        pipeline = PipelineBuilder.build(**build_kwargs)
         return ExperimentSetup(pipeline, params)
