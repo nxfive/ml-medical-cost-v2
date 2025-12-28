@@ -27,6 +27,3 @@ class MLflowLogger:
             self.service.log_artifacts(result.estimator, result.model_name, X_train)
             if register:
                 self.service.register_model(result.model_name)
-
-
-logger = MLflowLogger(service=MLflowService())
