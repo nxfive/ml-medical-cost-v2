@@ -39,9 +39,19 @@ class ParamValidator:
         Validates parameter grid for GridSearch:
 
         - Each parameter must be a non-empty list of values.
+        - Each value must be int, float, or str.
+        - All values in a list must be of the same type.
         """
         for name, values in param_grid.items():
             if not isinstance(values, list):
                 raise TypeError(f"{name}: values must be a list")
+
             if not values:
                 raise ValueError(f"{name}: values list cannot be empty")
+
+            if not all(isinstance(v, (int, float, str)) for v in values):
+                raise TypeError(f"{name}: all values must be int, float, or str")
+
+            types = {type(v) for v in values}
+            if len(types) > 1:
+                raise TypeError(f"{name}: all values must be of the same type")
