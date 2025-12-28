@@ -1,10 +1,14 @@
+import time
+
 from src.builders.training.training_pipeline_builder import \
     TrainingPipelineBuilder
 from src.conf.schema import TrainingStageConfig
 from src.containers.builder import TrainingBuildResult
 from src.containers.results import StageResult
 from src.evaluation.metrics import flatten_metrics
-from src.mlflow.logger import logger
+from src.logger.setup import logger
+from src.mlflow.logger import MLflowLogger
+from src.mlflow.service import MLflowService
 from src.models.savers.run_saver import RunSaver
 from src.patterns.base_pipeline import BasePipeline
 from src.serializers.prediction_set import PredictionSetSerializer
@@ -36,15 +40,31 @@ class TrainingPipeline(BasePipeline[TrainingBuildResult, None]):
         Trains and evaluates all defined models using cross-validation, logs results
         to MLflow and saves pipeline and training results to disk.
         """
+        logger.info("Running training stage")
+        start_training = time.perf_counter()
+
+        logger.info("Starting MLflow Service")
+        mlflow_logger = MLflowLogger(service=MLflowService())
+
+        logger.info("Initializing training pipeline environment")
         builder = self.build()
+
+        logger.info("Loading pre-split dataset")
         split_data = self.load_data(builder.loader)
         model_name = builder.model_spec.model_class.__name__
+        logger.info(f"Stage initialized for model: {model_name}")
 
-        for train_result in builder.training.run(
-            X_train=split_data.X_train,
-            X_test=split_data.X_test,
-            y_train=split_data.y_train,
+        for idx, train_result in enumerate(
+            builder.training.run(
+                X_train=split_data.X_train,
+                X_test=split_data.X_test,
+                y_train=split_data.y_train,
+            ),
+            start=1,
         ):
+            start_iteration = time.perf_counter()
+            logger.info(f"Running training iteration [{idx}] for model {model_name}")
+
             pred_set = PredictionSetSerializer.from_stage_pipeline(
                 result=train_result.runner_result, split_data=split_data
             )
@@ -63,12 +83,22 @@ class TrainingPipeline(BasePipeline[TrainingBuildResult, None]):
                 metrics=flatten_metrics(metrics),
                 model_name=model_name,
             )
+            logger.info("Logging model to MLflow")
             self._log_model(
-                logger,
+                mlflow_logger,
                 stage_result,
                 X_train=split_data.X_train,
             )
+            logger.info("Saving training results to disk")
             self._save_run(
                 run_saver=builder.run_saver,
                 stage_result=stage_result,
             )
+            end_iteration = time.perf_counter()
+            logger.info(
+                f"Iteration [{idx}] completed in {end_iteration - start_iteration:.2f}s"
+            )
+        end_training = time.perf_counter()
+        logger.info(
+            f"Training stage completed for model {model_name} in {end_training - start_training:.2f}s"
+        )
