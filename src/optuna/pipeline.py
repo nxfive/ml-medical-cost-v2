@@ -1,9 +1,13 @@
+import time
+
 from src.builders.optuna.optuna_pipeline_builder import OptunaPipelineBuilder
 from src.conf.schema import FeaturesConfig, OptunaStageConfig
 from src.containers.builder import OptunaBuildResult
 from src.containers.results import StageResult
 from src.evaluation.metrics import flatten_metrics
-from src.mlflow.logger import logger
+from src.logger.setup import logger
+from src.mlflow.logger import MLflowLogger
+from src.mlflow.service import MLflowService
 from src.models.savers.model_saver import ModelSaver
 from src.patterns.base_pipeline import BasePipeline
 from src.serializers.experiment import ExperimentSerializer
@@ -37,11 +41,22 @@ class OptunaPipeline(BasePipeline[OptunaBuildResult, None]):
         Optimizes hyperparameters for the best-performing model using Optuna,
         retrains it, and logs the final version to MLflow.
         """
+        logger.info("Running optuna stage")
         if not self.cfg.model.params:
-            print("No params to optimize, skipping optimization...")
+            logger.info("No params to optimize, skipping optimization")
             return
 
+        start_optuna = time.perf_counter()
+        logger.info("Starting MLflow Service")
+        mlflow_logger = MLflowLogger(service=MLflowService())
+
+        logger.info("Initializing optuna pipeline environment")
         builder = self.build()
+
+        model_name = builder.model_spec.model_class.__name__
+        logger.info(f"Stage initialized for model: {model_name}")
+
+        logger.info("Loading pre-split dataset")
         split_data = self.load_data(builder.data_loader)
 
         context = ExperimentSerializer.from_optuna_stage(
@@ -49,6 +64,7 @@ class OptunaPipeline(BasePipeline[OptunaBuildResult, None]):
             split_data=split_data,
         )
 
+        logger.info("Running optimization")
         run_result = OptunaExperimentManager(
             context=context,
             optimizer=builder.optimizer,
@@ -64,12 +80,20 @@ class OptunaPipeline(BasePipeline[OptunaBuildResult, None]):
         stage_result = StageResultSerializer.from_stage(
             result=run_result,
             metrics=flatten_metrics(metrics),
-            model_name=builder.model_spec.model_class.__name__,
+            model_name=model_name,
+        )
+        logger.info("Logging model to MLflow")
+        self._log_model(
+            mlflow_logger, stage_result, X_train=split_data.X_train, register=True
         )
 
-        self._log_model(logger, stage_result, X_train=split_data.X_train, register=True)
+        logger.info("Saving model with metadata to disk")
         self._save_model(
             model_saver=builder.model_saver,
             result=stage_result,
             features=self.cfg.features,
+        )
+        end_optuna = time.perf_counter()
+        logger.info(
+            f"Optuna stage completed for model {model_name} in {end_optuna - start_optuna:.2f}s"
         )
