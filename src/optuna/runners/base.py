@@ -17,7 +17,7 @@ class BaseExperimentRunner(ABC, Generic[OptunaRunnerResult]):
         Builds an ExperimentSetup, including the pipeline and parameters from the given
         experiment configuration and optional trial.
         """
-        return OptunaExperimentBuilder.build(
+        return OptunaExperimentBuilder().build(
             cfg=exp_config,
             trial=trial,
         )
