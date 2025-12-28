@@ -3,6 +3,7 @@ import numpy as np
 import optuna
 from src.containers.experiment import ExperimentContext
 from src.optuna.tuning import OptunaOptimize
+from src.serializers.experiment import ExperimentSerializer
 from src.tuning.runners import CrossValidationRunner
 
 from .base import BaseExperimentRunner
@@ -21,7 +22,7 @@ class WrapperOptunaRunner(BaseExperimentRunner[optuna.Study]):
         and returns the mean score across folds.
         """
         exp_setup = self.build(
-            exp_config=context.to_experiment_config(),
+            exp_config=ExperimentSerializer.to_experiment_config(context),
             trial=trial,
         )
         exp_setup.pipeline.set_params(**exp_setup.params)
