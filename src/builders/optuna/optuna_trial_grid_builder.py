@@ -1,9 +1,9 @@
 from typing import Any
 
 import optuna
+from src.builders.pipeline.pipeline_grid_builder import PipelineGridBuilder
+from src.builders.transformer.wrapper_grid_builder import WrapperGridBuilder
 from src.params.optuna_grid import OptunaGrid
-from src.params.optuna_updater import OptunaParamUpdater
-from src.params.prefixer import ParamGridPrefixer
 from src.tuning.transformers.registry import TRANSFORMERS
 
 from .optuna_space_builder import OptunaSpaceBuilder
@@ -11,53 +11,43 @@ from .optuna_space_builder import OptunaSpaceBuilder
 
 class OptunaTrialGridBuilder:
     @staticmethod
-    def _build_model_trial_params(
-        trial: optuna.Trial,
-        optuna_model_params: dict[str, Any],
-        model_params: dict[str, Any],
+    def _build_optuna_space_params(
+        params: dict[str, Any],
+        optuna_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Samples model parameters for the given trial based on the Optuna space.
+        Builds an Optuna search space from given parameters and optional 
+        Optuna config.
         """
-        model_space = OptunaSpaceBuilder.build(
-            optuna_params=optuna_model_params,
-            model_params=model_params,
-        )
-        return OptunaGrid.create_trial_params(trial=trial, optuna_space=model_space)
+        return OptunaSpaceBuilder.build(params, optuna_params)
 
     @staticmethod
-    def _build_transformer_trial_params(
-        trial: optuna.Trial, transformation: str, transformers: dict[str, Any]
+    def _build_trial_params(
+        trial: optuna.Trial, optuna_space: dict[str, Any]
     ) -> dict[str, Any]:
         """
-        Samples transformer parameters for the given trial and chosen transformation.
+        Suggests parameter values for a given Optuna trial based on the search 
+        space.
         """
-        transformer_params = transformers[transformation]
-        updated = OptunaParamUpdater.update(
-            model_params=transformer_params, optuna_params=None
-        )
-        transformer_space = OptunaGrid.create_optuna_space(updated)
-        return OptunaGrid.create_trial_params(
-            trial=trial,
-            optuna_space=transformer_space,
-        )
+        return OptunaGrid.create_trial_params(trial, optuna_space)
 
     @staticmethod
     def _merge_and_prefix(
-        model_trial_params: dict[str, Any],
-        transformer_trial_params: dict[str, Any] | None = None,
+        model_params: dict[str, Any],
+        transformer_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Merges model and transformer parameters and applies pipeline/wrapper prefixes.
+        Merges model and transformer parameters and applies pipeline/wrapper 
+        prefixes.
         """
-        if transformer_trial_params is None:
-            return ParamGridPrefixer().prepare_pipeline_grid(
-                model_params=model_trial_params
+        if transformer_params is None:
+            return PipelineGridBuilder.build(model_params)
+        else:
+            pipeline_grid = PipelineGridBuilder.build(model_params)
+            wrapper_grid = WrapperGridBuilder.build(
+                param_grid=pipeline_grid, transformer_params=transformer_params
             )
-        return ParamGridPrefixer().prepare_wrapper_grid(
-            model_params=model_trial_params,
-            transformer_params=transformer_trial_params,
-        )
+            return wrapper_grid
 
     def build(
         self,
@@ -68,25 +58,28 @@ class OptunaTrialGridBuilder:
     ) -> dict[str, Any]:
         """
         Builds the full trial parameter grid.
-        Includes transformer parameters only if a transformer is selected for optimization.
+        Includes transformer parameters only if a transformer is selected for 
+        optimization.
         """
-        model_trial_params = self._build_model_trial_params(
-            trial=trial,
-            optuna_model_params=optuna_params,
-            model_params=model_params,
-        )
         chosen_transformer = trial.suggest_categorical(
             "transformation", list(transformers)
         )
 
         spec = TRANSFORMERS[chosen_transformer]
-        if not spec.is_identity:
-            transformer_trial_params = self._build_transformer_trial_params(
-                trial=trial,
-                transformation=chosen_transformer,
-                transformers=transformers,
+        if spec.is_identity:
+            model_prefixed = self._merge_and_prefix(model_params)
+            model_space = self._build_optuna_space_params(
+                params=model_prefixed,
+                optuna_params=optuna_params,
             )
-            return self._merge_and_prefix(model_trial_params, transformer_trial_params)
+            return self._build_trial_params(trial, model_space)
 
         else:
-            return self._merge_and_prefix(model_trial_params)
+            transformer_params = transformers[chosen_transformer].params
+            prefixed = self._merge_and_prefix(model_params, transformer_params)
+            space = self._build_optuna_space_params(
+                params=prefixed,
+                optuna_params=optuna_params,
+            )
+
+            return self._build_trial_params(trial, space)
