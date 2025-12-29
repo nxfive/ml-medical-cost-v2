@@ -36,3 +36,11 @@ class MedicalCostDTO(MedicalCostFeatures):
     @classmethod
     def from_features(cls, features: MedicalCostFeatures, predicted_charge: float):
         return cls(**features.model_dump(), predicted_charge=predicted_charge)
+
+
+class PredictionResponse(BaseModel):
+    charges: float
+
+
+class PredictionManyResponse(BaseModel):
+    charges: list[float]
