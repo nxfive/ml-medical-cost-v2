@@ -3,15 +3,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from database.models import MedicalPrediction
+
 from .schemas import MedicalCostDTO
 
 
 class Database:
-
     def __init__(self, db: Session):
         self.db = db
 
-    def create_record(self, data: dict, prediction: float):
+    def create_record(self, data: dict, prediction: float) -> None:
+        """
+        Creates a single prediction record in the database.
+        """
         if prediction is None:
             raise ValueError("Prediction value cannot be None")
 
@@ -23,18 +26,21 @@ class Database:
 
         except ValidationError as e:
             raise ValueError(f"Error validating data: {e}")
-        
+
         except SQLAlchemyError as e:
             self.db.rollback()
             raise RuntimeError(f"Error saving prediction: {e}")
 
-    def create_records(self, data_list: list[dict], predictions: list[float]):
+    def create_records(self, data_list: list[dict], predictions: list[float]) -> None:
+        """
+        Creates multiple prediction records in the database.
+        """
         if predictions is None:
             raise ValueError("Predictions values cannot be None")
-        
+
         if len(data_list) != len(predictions):
             raise ValueError("Length of data_list and predictions must match")
-        
+
         if len(predictions) == 0:
             raise ValueError("Predictions cannot be empty")
 
@@ -49,7 +55,7 @@ class Database:
 
         except ValidationError as e:
             raise ValueError(f"Error validating data: {e}")
-        
+
         except SQLAlchemyError as e:
             self.db.rollback()
             raise RuntimeError(f"Error saving predictions: {e}")
