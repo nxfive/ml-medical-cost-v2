@@ -358,3 +358,4 @@ jobs:
             docker stack deploy -c ~/ml-medical-cost/app.yml ml-medical-cost
             docker logout ghcr.io
           "
+ 
