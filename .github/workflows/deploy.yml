@@ -88,6 +88,10 @@ jobs:
               docker secret rm "\$name" 2>/dev/null || true
               echo "\$value" | docker secret create "\$name" -
             done
+            
+            docker secret rm "PGADMIN_EMAIL_PATH" 2>/dev/null || true
+            echo "${PGADMIN_EMAIL//@/_}" | docker secret create "PGADMIN_EMAIL_PATH" -
+            
           EOF
 
   setup:
@@ -148,34 +152,112 @@ jobs:
             docker logout ghcr.io
           "
 
-  train:
-    name: Train & Choose the Best Model
+  stage-data:
     runs-on: self-hosted
     needs: setup
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up Python environment
-        run: python3 -m venv .venv
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
 
-      - name: Activate virtual environment and install dependencies
+      - name: Set up virtual environment
         run: |
-          source .venv/bin/activate
           python -m pip install --upgrade pip && pip install uv
           uv sync --group build --frozen
-            
-      - name: Run Training
+
+      - name: Run Data Stage
+        run: |
+          source .venv/bin/activate
+          python -m src.main stage=data
+
+      - name: Upload dataset artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dataset-parquet
+          path: data/processed/*.parquet
+
+  stage-training:
+    runs-on: self-hosted
+    needs: stage-data
+    strategy:
+      matrix:
+        model: [linear, knn, tree, rf]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Set up virtual environment
+        run: |
+          python -m pip install --upgrade pip && pip install uv
+          uv sync --group build --frozen
+
+      - name: Download dataset artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dataset-parquet
+          path: data/processed/
+
+      - name: Train model ${{ matrix.model }}
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
           source .venv/bin/activate
-          python -m src.main
+          python -m src.main stage=training model=${{ matrix.model }}
 
+      - name: Upload training artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-results-${{ matrix.model }}
+          path: src/training/results/*
+
+  stage-optuna:
+    runs-on: self-hosted
+    needs: stage-training
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Set up virtual environment
+        run: |
+          python -m pip install --upgrade pip && pip install uv
+          uv sync --group build --frozen
+
+      - name: Download dataset artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dataset-parquet
+          path: data/processed/
+
+      - name: Download training artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: training-results
+          path: src/training/results/
+
+      - name: Run Optuna Stage
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          source .venv/bin/activate
+          python -m src.main stage=optuna
 
   build_bento: 
     runs-on: self-hosted
-    needs: train
+    needs: stage-optuna
     env:
       BENTOML_HOME: ${{ github.workspace }}/bentoml
     steps:
@@ -185,20 +267,18 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.12"
+          python-version: "3.12" 
 
-      - name: Create and activate virtual environment
+      - name: Set up virtual environment
         run: |
-          python -m venv .venv
-          . .venv/bin/activate
-          pip install --upgrade pip uv
+          python -m pip install --upgrade pip && pip install uv
           uv sync --group build --frozen
 
       - name: Register MLflow model and build Bento
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
-          . .venv/bin/activate
+          source .venv/bin/activate
           mkdir -p "$BENTOML_HOME"
           python -m services.backend.bento.register
           bentoml build services/backend/bento/
@@ -209,7 +289,7 @@ jobs:
 
       - name: Containerize Bento
         run: |
-          . .venv/bin/activate
+          source .venv/bin/activate
           bentoml containerize medical_regressor_service:latest --image-tag $IMAGE_BENTO:$TAG
           docker push $IMAGE_BENTO:$TAG
           docker tag $IMAGE_BENTO:$TAG $IMAGE_BENTO:latest
